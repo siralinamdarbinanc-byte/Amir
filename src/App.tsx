@@ -99,60 +99,61 @@ export default function App() {
       ]);
 
       if (appRes.ok) {
-        const fetchedApps: Appointment[] = await appRes.json();
-        
-        // Detect real-time updates for notifications
-        if (!isFirstLoad.current && prevAppointmentsRef.current.length > 0) {
-          // Check for new pending appointment (Notify Admin)
-          const newPending = fetchedApps.filter(
-            fa => fa.status === 'pending' && !prevAppointmentsRef.current.some(pa => pa.id === fa.id)
-          );
-
-          if (newPending.length > 0) {
-            soundEngine.playAdminAlertSound();
-            const latest = newPending[0];
-            addToast(
-              '🔊 نوبت جدید ثبت شد!',
-              `مشتری ${latest.customerName} برای تاریخ ${latest.jDate} ساعت ${latest.timeSlot} نوبت جدید ثبت کرد.`,
-              'info'
+        const fetchedApps = await appRes.json();
+        if (Array.isArray(fetchedApps)) {
+          // Detect real-time updates for notifications
+          if (!isFirstLoad.current && prevAppointmentsRef.current.length > 0) {
+            // Check for new pending appointment (Notify Admin)
+            const newPending = fetchedApps.filter(
+              fa => fa.status === 'pending' && !prevAppointmentsRef.current.some(pa => pa.id === fa.id)
             );
+
+            if (newPending.length > 0) {
+              soundEngine.playAdminAlertSound();
+              const latest = newPending[0];
+              addToast(
+                '🔊 نوبت جدید ثبت شد!',
+                `مشتری ${latest.customerName} برای تاریخ ${latest.jDate} ساعت ${latest.timeSlot} نوبت جدید ثبت کرد.`,
+                'info'
+              );
+            }
+
+            // Check for status changes on customer appointments
+            fetchedApps.forEach(fa => {
+              const oldApp = prevAppointmentsRef.current.find(pa => pa.id === fa.id);
+              if (oldApp && oldApp.status !== fa.status) {
+                if (fa.status === 'approved') {
+                  soundEngine.playApprovalSound();
+                  addToast(
+                    '✅ نوبت شما تأیید شد',
+                    `نوبت کد ${fa.trackingCode} برای ${fa.jDate} ساعت ${fa.timeSlot} تأیید شد. لطفاً ۵ دقیقه قبل در سالن حضور داشته باشید.`,
+                    'success'
+                  );
+                } else if (fa.status === 'rejected') {
+                  soundEngine.playRejectTone();
+                  addToast(
+                    '❌ عدم تأیید نوبت',
+                    `درخواست رزرو ${fa.jDate} ساعت ${fa.timeSlot} تأیید نشد. ${fa.rejectionReason ? `علت: ${fa.rejectionReason}` : ''}`,
+                    'error'
+                  );
+                }
+              }
+            });
           }
 
-          // Check for status changes on customer appointments
-          fetchedApps.forEach(fa => {
-            const oldApp = prevAppointmentsRef.current.find(pa => pa.id === fa.id);
-            if (oldApp && oldApp.status !== fa.status) {
-              if (fa.status === 'approved') {
-                soundEngine.playApprovalSound();
-                addToast(
-                  '✅ نوبت شما تأیید شد',
-                  `نوبت کد ${fa.trackingCode} برای ${fa.jDate} ساعت ${fa.timeSlot} تأیید شد. لطفاً ۵ دقیقه قبل در سالن حضور داشته باشید.`,
-                  'success'
-                );
-              } else if (fa.status === 'rejected') {
-                soundEngine.playRejectTone();
-                addToast(
-                  '❌ عدم تأیید نوبت',
-                  `درخواست رزرو ${fa.jDate} ساعت ${fa.timeSlot} تأیید نشد. ${fa.rejectionReason ? `علت: ${fa.rejectionReason}` : ''}`,
-                  'error'
-                );
-              }
-            }
-          });
+          prevAppointmentsRef.current = fetchedApps;
+          setAppointments(fetchedApps);
+          isFirstLoad.current = false;
         }
-
-        prevAppointmentsRef.current = fetchedApps;
-        setAppointments(fetchedApps);
-        isFirstLoad.current = false;
       }
 
       if (servRes.ok) {
         const servs = await servRes.json();
-        setServices(servs);
+        if (Array.isArray(servs)) setServices(servs);
       }
       if (specRes.ok) {
         const specs = await specRes.json();
-        setSpecialists(specs);
+        if (Array.isArray(specs)) setSpecialists(specs);
       }
       if (settRes.ok) {
         const setts = await settRes.json();

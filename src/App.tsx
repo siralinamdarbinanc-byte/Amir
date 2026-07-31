@@ -9,9 +9,42 @@ import { QrCodeModal } from './components/QrCodeModal';
 import { NotificationToast, ToastMessage } from './components/NotificationToast';
 import { Appointment, BarberService, BarberSpecialist, ShopSettings } from './types';
 import { soundEngine } from './utils/audio';
+import { Lock } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'book' | 'my-bookings' | 'services' | 'admin'>('book');
+
+  // Hash routing for complete separation of customer page vs admin page
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash;
+      const path = window.location.pathname;
+      if (hash === '#admin' || path === '/admin') {
+        setActiveTab('admin');
+      } else if (hash === '#services') {
+        setActiveTab('services');
+      } else if (hash === '#my-bookings') {
+        setActiveTab('my-bookings');
+      }
+    };
+
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const changeTab = (tab: 'book' | 'my-bookings' | 'services' | 'admin') => {
+    setActiveTab(tab);
+    if (tab === 'admin') {
+      window.location.hash = 'admin';
+    } else if (tab === 'my-bookings') {
+      window.location.hash = 'my-bookings';
+    } else if (tab === 'services') {
+      window.location.hash = 'services';
+    } else {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  };
   
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [services, setServices] = useState<BarberService[]>([]);
@@ -22,6 +55,8 @@ export default function App() {
     instagram: '@amir_barber_official',
     address: 'تهران، خیابان ولیعصر، نرسیده به میدان ونک، پلاک ۱۲۴',
     adminPin: '1234',
+    authMode: 'remote',
+    authWebhookUrl: 'https://script.google.com/macros/s/AKfycbx2RqPAsaO9kuXG-XwA4ik4P-nTvkOxkoeyBzZU-F21d4eB2FcLwZsV0QMq3NrRHUBl/exec',
     openingTime: '09:30',
     closingTime: '21:30',
     slotDuration: 30,
@@ -121,7 +156,12 @@ export default function App() {
       }
       if (settRes.ok) {
         const setts = await settRes.json();
-        setSettings(setts);
+        setSettings(prev => ({
+          ...prev,
+          ...setts,
+          authWebhookUrl: setts.authWebhookUrl || prev.authWebhookUrl || 'https://script.google.com/macros/s/AKfycbx2RqPAsaO9kuXG-XwA4ik4P-nTvkOxkoeyBzZU-F21d4eB2FcLwZsV0QMq3NrRHUBl/exec',
+          authMode: setts.authMode || prev.authMode || 'remote'
+        }));
       }
     } catch {
       // Server poll fallback
@@ -234,13 +274,14 @@ export default function App() {
       {/* Navigation Header */}
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={changeTab}
         pendingCount={pendingCount}
         soundEnabled={soundEnabled}
         setSoundEnabled={setSoundEnabled}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
         onOpenQrModal={() => setIsQrModalOpen(true)}
         shopPhone={settings.phone}
+        hideAdminButton={settings.hideAdminButton}
       />
 
       {/* Main Content Area */}
@@ -254,7 +295,7 @@ export default function App() {
             onBookingSuccess={(newApp) => {
               setAppointments(prev => [newApp, ...prev]);
             }}
-            onNavigateToMyBookings={() => setActiveTab('my-bookings')}
+            onNavigateToMyBookings={() => changeTab('my-bookings')}
           />
         )}
 
@@ -271,7 +312,7 @@ export default function App() {
           <ServicesList
             services={services}
             onSelectServiceToBook={() => {
-              setActiveTab('book');
+              changeTab('book');
             }}
           />
         )}
@@ -295,14 +336,26 @@ export default function App() {
         <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <div>
             <span className="font-bold text-amber-400">پیرایش امیر</span>
-            <span> — سامانه رزرو آنلاین نوبت و مدیریت هوشمند سالن</span>
+            <span> — سامانه رزرو آنلاین نوبت و خدمات آرایشگاهی</span>
           </div>
-          <div className="flex items-center gap-4 text-zinc-400">
+          <div className="flex items-center gap-4 text-zinc-400 text-[11px]">
             <span>ساعات کاری: {settings.openingTime} الی {settings.closingTime}</span>
             <span>|</span>
             <a href={`tel:${settings.phone}`} className="hover:text-amber-400 transition-colors">
               پشتیبانی: {settings.phone}
             </a>
+            {!settings.hideAdminButton && (
+              <>
+                <span>|</span>
+                <button 
+                  onClick={() => changeTab('admin')} 
+                  className="inline-flex items-center gap-1 text-zinc-500 hover:text-amber-400 transition-colors"
+                >
+                  <Lock className="w-3 h-3 text-amber-500/80" />
+                  <span>ورود مدیر سالن</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </footer>

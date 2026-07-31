@@ -262,29 +262,39 @@ export const CustomerBooking: React.FC<CustomerBookingProps> = ({
     );
   }
 
+  // Category helper for clean grouping
+  const categoriesList = [
+    { id: 'hair', name: 'اصلاح سر و استایل', icon: <Scissors className="w-4 h-4 text-amber-400" />, desc: 'انواع مدل‌های مو و فید اختصاصی' },
+    { id: 'beard', name: 'اصلاح و آنکارد ریش', icon: <Sparkles className="w-4 h-4 text-amber-400" />, desc: 'فرم‌دهی ریش و حوله گرم' },
+    { id: 'package', name: 'پکیج‌های ویژه VIP', icon: <Crown className="w-4 h-4 text-amber-400" />, desc: 'ترکیب اصلاح سر، ریش و پاکسازی' },
+    { id: 'skin', name: 'فیشیال و خدمات پوست', icon: <Smile className="w-4 h-4 text-amber-400" />, desc: 'ماسک صورت، بخور و پاکسازی' },
+  ];
+
+  const currentCategoryObj = categoriesList.find(c => c.id === selectedCategory) || categoriesList[0];
+
   return (
     <div className="max-w-3xl mx-auto py-4 px-3 sm:px-4">
-      {/* Announcement banner if set */}
+      {/* Announcement banner if set (Clean & Compact) */}
       {settings.announcement && (
-        <div className="bg-gradient-to-r from-amber-500/15 via-zinc-900 to-amber-500/15 border border-amber-500/30 rounded-xl p-3 mb-5 text-center text-xs text-amber-300/90 leading-relaxed shadow-sm flex items-center justify-center gap-2">
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4 text-xs text-amber-300 flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>{settings.announcement}</span>
+          <span className="leading-relaxed flex-1">{settings.announcement}</span>
         </div>
       )}
 
       {/* Wizard Progress Bar */}
-      <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 mb-5">
+      <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-3.5 mb-5 shadow-sm">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-bold text-amber-400">
             مرحله {toPersianDigits(step)} از ۴: {
               step === 1 ? 'انتخاب خدمت' :
               step === 2 ? 'انتخاب آرایشگر' :
-              step === 3 ? 'زمان و تاریخ' : 'مشخصات تماس'
+              step === 3 ? 'زمان و تاریخ' : 'مشخصات شما'
             }
           </span>
-          <span className="text-xs text-zinc-400">{toPersianDigits(Math.round((step / 4) * 100))}%</span>
+          <span className="text-xs font-mono text-zinc-400">{toPersianDigits(Math.round((step / 4) * 100))}%</span>
         </div>
-        <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
+        <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
           <div 
             className="bg-gradient-to-r from-amber-600 to-amber-400 h-full transition-all duration-300 rounded-full"
             style={{ width: `${(step / 4) * 100}%` }}
@@ -300,116 +310,111 @@ export const CustomerBooking: React.FC<CustomerBookingProps> = ({
         </div>
       )}
 
-      {/* STEP 1: CHOOSE SERVICE */}
+      {/* STEP 1: CHOOSE SERVICE (Categorized & Uncluttered) */}
       {step === 1 && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
-                <Scissors className="w-5 h-5 text-amber-400" />
-                <span>۱. خدمت مورد نظر خود را انتخاب کنید</span>
-              </h2>
-              <p className="text-xs text-zinc-400 mt-1">لیست خدمات و هزینه‌های آرایشگاه پیرایش امیر</p>
-            </div>
-
-            {/* Category Filter Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-              <button
-                onClick={() => setSelectedCategory('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                  selectedCategory === 'all'
-                    ? 'bg-amber-500 text-zinc-950 font-bold'
-                    : 'bg-zinc-800/80 text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                همه خدمات
-              </button>
-              <button
-                onClick={() => setSelectedCategory('hair')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                  selectedCategory === 'hair'
-                    ? 'bg-amber-500 text-zinc-950 font-bold'
-                    : 'bg-zinc-800/80 text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                اصلاح سر
-              </button>
-              <button
-                onClick={() => setSelectedCategory('beard')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                  selectedCategory === 'beard'
-                    ? 'bg-amber-500 text-zinc-950 font-bold'
-                    : 'bg-zinc-800/80 text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                اصلاح ریش
-              </button>
-              <button
-                onClick={() => setSelectedCategory('skin')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                  selectedCategory === 'skin'
-                    ? 'bg-amber-500 text-zinc-950 font-bold'
-                    : 'bg-zinc-800/80 text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                فیشیال پوست
-              </button>
-              <button
-                onClick={() => setSelectedCategory('package')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                  selectedCategory === 'package'
-                    ? 'bg-amber-500 text-zinc-950 font-bold'
-                    : 'bg-zinc-800/80 text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                پکیج‌ها
-              </button>
-            </div>
+          <div>
+            <h2 className="text-base font-bold text-zinc-100 flex items-center gap-2">
+              <Scissors className="w-5 h-5 text-amber-400" />
+              <span>۱. دسته بندی و خدمت مورد نظر را انتخاب کنید</span>
+            </h2>
+            <p className="text-xs text-zinc-400 mt-0.5">برای مشاهده خدمات، روی دسته بندی مورد نظر بزنید</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-            {filteredServices.map(service => {
-              const isSelected = selectedService?.id === service.id;
+          {/* Clean Main Categories Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {categoriesList.map(cat => {
+              const isSelected = selectedCategory === cat.id;
+              const catServicesCount = activeServices.filter(s => s.category === cat.id).length;
               return (
-                <div
-                  key={service.id}
-                  onClick={() => setSelectedService(service)}
-                  className={`cursor-pointer rounded-xl p-4 border transition-all relative ${
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={`flex flex-col items-start p-3 rounded-xl border text-right transition-all ${
                     isSelected
-                      ? 'bg-amber-500/10 border-amber-500 text-zinc-100 shadow-lg shadow-amber-500/10'
-                      : 'bg-zinc-900/80 border-zinc-800/90 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900'
+                      ? 'bg-amber-500/15 border-amber-500 text-amber-400 shadow-md shadow-amber-500/10'
+                      : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900/80'
                   }`}
                 >
-                  <div className="flex items-start gap-3">
-                    <div className={`p-2.5 rounded-xl ${isSelected ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-800 text-amber-400'}`}>
-                      {getServiceIcon(service.iconName, service.category)}
+                  <div className="flex items-center justify-between w-full mb-1">
+                    <div className="p-1.5 rounded-lg bg-zinc-800 text-amber-400">
+                      {cat.icon}
                     </div>
-
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="font-bold text-sm text-zinc-100">{service.name}</h3>
-                        {isSelected && <CheckCircle2 className="w-4 h-4 text-amber-400" />}
-                      </div>
-                      <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed mb-3">{service.description}</p>
-                      
-                      <div className="flex items-center justify-between pt-2 border-t border-zinc-800/80 text-xs">
-                        <span className="flex items-center gap-1 text-zinc-400">
-                          <Clock className="w-3.5 h-3.5 text-zinc-500" />
-                          <span>{toPersianDigits(service.duration)} دقیقه</span>
-                        </span>
-                        <span className="font-bold text-amber-400">{formatPrice(service.price)}</span>
-                      </div>
-                    </div>
+                    <span className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded-md font-mono">
+                      {toPersianDigits(catServicesCount)} خدمت
+                    </span>
                   </div>
-                </div>
+                  <span className="font-bold text-xs text-zinc-100 mt-1">{cat.name}</span>
+                </button>
               );
             })}
           </div>
 
-          <div className="pt-4 flex justify-end">
+          {/* Services List inside selected category */}
+          <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-4 space-y-3 mt-2">
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60">
+              <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                {currentCategoryObj.icon}
+                <span>خدمات {currentCategoryObj.name}</span>
+              </span>
+              <span className="text-[11px] text-zinc-400">{currentCategoryObj.desc}</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {filteredServices.map(service => {
+                const isSelected = selectedService?.id === service.id;
+                return (
+                  <div
+                    key={service.id}
+                    onClick={() => setSelectedService(service)}
+                    className={`cursor-pointer rounded-xl p-3.5 border transition-all relative ${
+                      isSelected
+                        ? 'bg-amber-500/15 border-amber-500 text-zinc-100 shadow-lg shadow-amber-500/10'
+                        : 'bg-zinc-950 border-zinc-800/90 text-zinc-300 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`p-2 rounded-xl ${isSelected ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-amber-400'}`}>
+                        {getServiceIcon(service.iconName, service.category)}
+                      </div>
+
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <h3 className="font-bold text-xs text-zinc-100">{service.name}</h3>
+                          {isSelected && <CheckCircle2 className="w-4 h-4 text-amber-400" />}
+                        </div>
+                        <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed mb-2.5">{service.description}</p>
+                        
+                        <div className="flex items-center justify-between pt-2 border-t border-zinc-800/80 text-[11px]">
+                          <span className="flex items-center gap-1 text-zinc-400">
+                            <Clock className="w-3.5 h-3.5 text-zinc-500" />
+                            <span>{toPersianDigits(service.duration)} دقیقه</span>
+                          </span>
+                          <span className="font-bold text-amber-400">{formatPrice(service.price)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Next Button Footer */}
+          <div className="pt-2 flex items-center justify-between">
+            {selectedService ? (
+              <div className="text-xs text-zinc-300 bg-zinc-900 px-3 py-2 rounded-xl border border-zinc-800 flex items-center gap-2">
+                <span className="text-zinc-400">انتخاب شده:</span>
+                <span className="font-bold text-amber-400">{selectedService.name}</span>
+                <span className="text-zinc-500 font-mono">({formatPrice(selectedService.price)})</span>
+              </div>
+            ) : (
+              <div className="text-xs text-zinc-500">لطفاً یک خدمت را انتخاب نمایید.</div>
+            )}
+
             <button
               onClick={handleNextStep}
-              className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold px-6 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2"
+              className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold px-5 py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-amber-500/20 flex items-center gap-1.5"
             >
               <span>مرحله بعدی: انتخاب آرایشگر</span>
               <ChevronLeft className="w-4 h-4" />

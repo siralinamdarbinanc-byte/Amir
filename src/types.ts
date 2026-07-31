@@ -52,6 +52,10 @@ export interface ShopSettings {
   instagram: string;
   address: string;
   adminPin: string;
+  adminPinHash?: string;
+  hideAdminButton?: boolean;
+  authMode?: 'local' | 'remote';
+  authWebhookUrl?: string;
   openingTime: string; // "09:30"
   closingTime: string; // "21:30"
   slotDuration: number; // 30 mins

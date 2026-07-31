@@ -102,17 +102,36 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({ isOpen, onClose }) => 
           </div>
         </div>
 
-        {/* Link Customizer */}
-        <div className="space-y-1.5 bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-          <label className="block text-xs font-medium text-zinc-300">آدرس لینک قرار گرفته در بارکد QR:</label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={targetUrl}
-              onChange={(e) => setTargetUrl(e.target.value)}
-              className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-1.5 text-xs text-zinc-100 font-mono dir-ltr"
-              placeholder="https://yourusername.github.io/barber"
-            />
+        {/* Link Customizers */}
+        <div className="space-y-3 bg-zinc-950 p-3.5 rounded-xl border border-zinc-800 text-xs">
+          <div>
+            <label className="block font-bold text-amber-400 mb-1">۱. لینک عمومی رزرو مشتریان (در QR بارکد):</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={targetUrl}
+                onChange={(e) => setTargetUrl(e.target.value)}
+                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-1.5 text-zinc-100 font-mono dir-ltr"
+                placeholder="https://yourusername.github.io/barber"
+              />
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-zinc-800">
+            <label className="block font-bold text-zinc-300 mb-1">۲. لینک اختصاصی و محرمانه مدیر سالن (Admin):</label>
+            <div className="flex items-center justify-between bg-zinc-900 border border-zinc-700/80 rounded-xl px-3 py-1.5 font-mono text-amber-300 dir-ltr text-[11px]">
+              <span>{targetUrl.split('#')[0]}#admin</span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`${targetUrl.split('#')[0]}#admin`);
+                  alert('لینک اختصاصی مدیر کپی شد.');
+                }}
+                className="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-md hover:bg-amber-500/30 transition-colors"
+              >
+                کپی
+              </button>
+            </div>
+            <p className="text-[10px] text-zinc-400 mt-1">صفحه مدیریت سالن کاملاً از دید مشتریان مجزا بوده و نیاز به رمز عبور دارد.</p>
           </div>
         </div>
 

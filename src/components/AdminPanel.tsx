@@ -3,11 +3,12 @@ import {
   ShieldCheck, Lock, CheckCircle2, XCircle, Clock, Calendar, 
   DollarSign, RefreshCw, Volume2, VolumeX, Plus, Trash2, Edit2, 
   Settings, Download, FileSpreadsheet, ExternalLink, Eye, EyeOff, AlertTriangle, 
-  Sparkles, Phone, User, Check, Search, Share2, HelpCircle 
+  Sparkles, Phone, User, Check, Search, Share2, HelpCircle, Code, Copy, Globe, Server, Loader2
 } from 'lucide-react';
 import { Appointment, BarberService, ShopSettings } from '../types';
 import { formatPrice, toPersianDigits } from '../utils/jalali';
 import { soundEngine } from '../utils/audio';
+import { hashPin, verifyPin, getSecurityState, recordFailedAttempt, resetFailedAttempts, verifyRemotePinOrPassword, GOOGLE_APPS_SCRIPT_AUTH_TEMPLATE } from '../utils/security';
 
 interface AdminPanelProps {
   appointments: Appointment[];
@@ -30,10 +31,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onDeleteService,
   onSaveSettings
 }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  // Read session storage on load
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return typeof window !== 'undefined' && sessionStorage.getItem('amir_barber_admin_auth') === 'true';
+  });
   const [pinInput, setPinInput] = useState<string>('');
   const [showPin, setShowPin] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string>('');
+  const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
+  const [showGasModal, setShowGasModal] = useState<boolean>(false);
+  const [testingRemoteAuth, setTestingRemoteAuth] = useState<boolean>(false);
+  const [testAuthResult, setTestAuthResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [copiedGasCode, setCopiedGasCode] = useState<boolean>(false);
 
   const [adminTab, setAdminTab] = useState<'appointments' | 'services' | 'settings' | 'export'>('appointments');
   const [filterStatus, setFilterStatus] = useState<string>('pending');
@@ -48,22 +57,80 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Settings form state
   const [settingsForm, setSettingsForm] = useState<ShopSettings>(settings);
+  const [newPinVal, setNewPinVal] = useState<string>('');
+  const [pinChangeMsg, setPinChangeMsg] = useState<string>('');
 
   useEffect(() => {
     setSettingsForm(settings);
   }, [settings]);
 
   // Handle Login
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
-    if (pinInput === (settings.adminPin || '1234')) {
+
+    // Check brute-force lockout
+    const secState = getSecurityState();
+    if (secState.lockoutUntil && Date.now() < secState.lockoutUntil) {
+      const remainingMins = Math.ceil((secState.lockoutUntil - Date.now()) / 60000);
+      setLoginError(`به علت ۵ بار رمز اشتباه، حساب تا ${toPersianDigits(remainingMins)} دقیقه دیگر قفل است.`);
+      soundEngine.playRejectTone();
+      return;
+    }
+
+    // Check if Remote Google Sheets Authentication is enabled
+    if (settings.authMode === 'remote' && settings.authWebhookUrl) {
+      setIsAuthenticating(true);
+      try {
+        const remoteRes = await verifyRemotePinOrPassword(settings.authWebhookUrl, pinInput);
+        if (remoteRes.success) {
+          setIsAuthenticated(true);
+          sessionStorage.setItem('amir_barber_admin_auth', 'true');
+          resetFailedAttempts();
+          soundEngine.playBookingChime();
+        } else {
+          const newState = recordFailedAttempt();
+          if (newState.lockoutUntil) {
+            setLoginError('۵ بار تلاش ناموفق ثبت شد! ورود تا ۱۵ دقیقه مسدود گردید.');
+          } else {
+            setLoginError(remoteRes.message || 'رمز عبور وارد شده با اطلاعات گوگل شیت مطابقت ندارد.');
+          }
+          soundEngine.playRejectTone();
+        }
+      } catch (err) {
+        setLoginError('خطا در برقراری ارتباط با گوگل شیت.');
+        soundEngine.playRejectTone();
+      } finally {
+        setIsAuthenticating(false);
+      }
+      return;
+    }
+
+    // Default: Local SHA-256 Hashing Verification
+    const targetPinOrHash = settings.adminPinHash || settings.adminPin || '1234';
+    const isValid = await verifyPin(pinInput, targetPinOrHash);
+
+    if (isValid) {
       setIsAuthenticated(true);
+      sessionStorage.setItem('amir_barber_admin_auth', 'true');
+      resetFailedAttempts();
       soundEngine.playBookingChime();
     } else {
-      setLoginError('رمز عبور (پین کد) اشتباه است. (پین پیش‌فرض: ۱۲۳۴)');
+      const newState = recordFailedAttempt();
+      if (newState.lockoutUntil) {
+        setLoginError('۵ بار تلاش ناموفق ثبت شد! برای جلوگیری از هک، ورود تا ۱۵ دقیقه مسدود شد.');
+      } else {
+        const remaining = 5 - newState.failedAttempts;
+        setLoginError(`رمز عبور اشتباه است. (${toPersianDigits(remaining)} فرصت دیگر باقی‌مانده)`);
+      }
       soundEngine.playRejectTone();
     }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    sessionStorage.removeItem('amir_barber_admin_auth');
+    setPinInput('');
   };
 
   // Filter appointments
@@ -110,6 +177,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // LOGIN SCREEN
   if (!isAuthenticated) {
+    const isRemote = settings.authMode === 'remote' && !!settings.authWebhookUrl;
+
     return (
       <div className="max-w-md mx-auto py-10 px-4">
         <div className="bg-zinc-900/95 border border-amber-500/30 rounded-2xl p-6 sm:p-8 shadow-2xl text-center relative overflow-hidden">
@@ -118,22 +187,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
 
           <h2 className="text-xl font-bold text-amber-400 mb-1">ورود به پنل مدیریت پیرایش امیر</h2>
-          <p className="text-xs text-zinc-400 mb-6">برای مدیریت نوبت‌ها، تغییر قیمت‌ها و تنظیمات وارد شوید.</p>
+          <p className="text-xs text-zinc-400 mb-4">برای مدیریت نوبت‌ها، تغییر قیمت‌ها و تنظیمات وارد شوید.</p>
+
+          {/* Mode Badge */}
+          <div className="mb-6 flex items-center justify-center">
+            {isRemote ? (
+              <span className="inline-flex items-center gap-1.5 text-[11px] bg-sky-500/10 text-sky-400 border border-sky-500/30 px-3 py-1 rounded-full font-bold">
+                <Globe className="w-3.5 h-3.5" />
+                <span>احراز هویت آنلاین از طریق گوگل شیت</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full font-bold">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>احراز هویت امن با هش SHA-256</span>
+              </span>
+            )}
+          </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-zinc-300 mb-2 text-right">
-                کد پین مدیریت (پیش‌فرض: <span className="text-amber-400 font-mono font-bold">1234</span>)
+                {isRemote ? 'رمز عبور مدیریت (استعلام از گوگل شیت):' : 'کد پین مدیریت (پیش‌فرض: 1234)'}
               </label>
 
               <div className="relative">
                 <input
                   type={showPin ? "text" : "password"}
                   required
-                  placeholder="۱۲۳۴"
+                  placeholder={isRemote ? "رمز عبور..." : "۱۲۳۴"}
                   value={pinInput}
+                  disabled={isAuthenticating}
                   onChange={(e) => setPinInput(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-center text-lg font-bold tracking-widest text-amber-400 focus:outline-none focus:border-amber-500 transition-colors"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-center text-lg font-bold tracking-widest text-amber-400 focus:outline-none focus:border-amber-500 transition-colors disabled:opacity-50"
                 />
                 <button
                   type="button"
@@ -153,10 +238,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <button
               type="submit"
-              className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold py-3 rounded-xl text-sm transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+              disabled={isAuthenticating}
+              className="w-full bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-700 text-zinc-950 font-bold py-3 rounded-xl text-sm transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
             >
-              <ShieldCheck className="w-4 h-4" />
-              <span>ورود به پنل ادمین</span>
+              {isAuthenticating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>در حال استعلام رمز از گوگل شیت...</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>ورود به پنل ادمین</span>
+                </>
+              )}
             </button>
           </form>
         </div>
@@ -190,10 +285,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </button>
 
           <button
-            onClick={() => setIsAuthenticated(false)}
-            className="text-xs text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-3 py-2 rounded-xl transition-colors"
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-xs text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-3 py-2 rounded-xl transition-colors font-medium"
           >
-            خروج از ادمین
+            <Lock className="w-3.5 h-3.5" />
+            <span>قفل و خروج از ادمین</span>
           </button>
         </div>
       </div>
@@ -553,16 +649,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-300 mb-1">پین کد مدیریت (ادمین):</label>
-              <input
-                type="text"
-                value={settingsForm.adminPin}
-                onChange={(e) => setSettingsForm({ ...settingsForm, adminPin: e.target.value })}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-bold text-center dir-ltr"
-              />
-            </div>
-
-            <div>
               <label className="block text-xs font-medium text-zinc-300 mb-1">آدرس سالن:</label>
               <input
                 type="text"
@@ -571,6 +657,188 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100"
               />
             </div>
+          </div>
+
+          {/* Secure SHA-256 Password Management Box */}
+          <div className="bg-zinc-950 border border-amber-500/30 rounded-2xl p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-xs text-amber-400 flex items-center gap-2">
+                <Lock className="w-4 h-4 text-emerald-400" />
+                <span>امنیت و تغییر رمز عبور مدیر سالن (SHA-256 Hash)</span>
+              </h4>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-mono">
+                محافظت هش یک‌طرفه
+              </span>
+            </div>
+
+            <p className="text-[11px] text-zinc-400 leading-relaxed">
+              رمز عبور شما با استاندارد رمزنگاری یک‌طرفه <span className="text-amber-300 font-mono">SHA-256</span> ذخیره می‌شود. حتی اگر کسی کدهای سورس سایت را بررسی کند، امکان مشاهده یا حدس زدن رمز شما به هیچ عنوان وجود ندارد.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="password"
+                placeholder="رمز عبور جدید خود را وارد کنید..."
+                value={newPinVal}
+                onChange={(e) => setNewPinVal(e.target.value)}
+                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-amber-400 font-bold dir-ltr placeholder:text-zinc-600"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!newPinVal.trim()) {
+                    setPinChangeMsg('لطفاً یک رمز عبور جدید وارد کنید.');
+                    return;
+                  }
+                  const hash = await hashPin(newPinVal.trim());
+                  const updated = {
+                    ...settingsForm,
+                    adminPin: '********',
+                    adminPinHash: hash
+                  };
+                  setSettingsForm(updated);
+                  onSaveSettings(updated);
+                  setNewPinVal('');
+                  setPinChangeMsg('رمز عبور جدید به صورت امن و هش شده ذخیره گردید! 🔒');
+                  setTimeout(() => setPinChangeMsg(''), 4000);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition-colors shrink-0"
+              >
+                ذخیره رمز جدید (SHA-256)
+              </button>
+            </div>
+
+            {pinChangeMsg && (
+              <p className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 p-2 rounded-xl text-center">
+                {pinChangeMsg}
+              </p>
+            )}
+
+            {/* Hide Admin Button Toggle */}
+            <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between">
+              <div>
+                <span className="font-bold text-xs text-zinc-200 block">مخفی‌سازی کامل دکمه‌های ورود ادمین در صفحه مشتریان</span>
+                <span className="text-[11px] text-zinc-400">با فعال‌سازی این گزینه، دکمه ادمین از دید مشتریان مخفی شده و فقط با تایپ <span className="text-amber-400 font-mono">#admin</span> در آخر آدرس سایت وارد می‌شوید.</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={settingsForm.hideAdminButton || false}
+                onChange={(e) => setSettingsForm({ ...settingsForm, hideAdminButton: e.target.checked })}
+                className="w-5 h-5 accent-amber-500 rounded cursor-pointer shrink-0"
+              />
+            </div>
+          </div>
+
+          {/* Remote Google Sheets Password Verification Box */}
+          <div className="bg-zinc-950 border border-sky-500/30 rounded-2xl p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-xs text-sky-400 flex items-center gap-2">
+                <Globe className="w-4 h-4 text-sky-400" />
+                <span>احراز هویت آنلاین از طریق گوگل شیت (Google Apps Script)</span>
+              </h4>
+              <span className="text-[10px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded-full font-mono">
+                رمز در گوگل شیت
+              </span>
+            </div>
+
+            <p className="text-[11px] text-zinc-400 leading-relaxed">
+              در این روش، رمز عبور مدیر سالن به هیچ عنوان در سایت یا مرورگر ذخیره نمی‌شود. هنگام ورود، سایت رمز را به اسکریپت اختصاصی شما در گوگل شیت ارسال کرده و پاسخ را به صورت آنلاین استعلام می‌کند.
+            </p>
+
+            {/* Auth Mode Toggle */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-900 rounded-xl border border-zinc-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setSettingsForm({ ...settingsForm, authMode: 'local' })}
+                className={`py-2 px-3 rounded-lg font-bold text-center transition-all ${
+                  settingsForm.authMode !== 'remote'
+                    ? 'bg-amber-500 text-zinc-950 shadow-md'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                🔒 رمز محلی SHA-256 (پیش‌فرض)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsForm({ ...settingsForm, authMode: 'remote' })}
+                className={`py-2 px-3 rounded-lg font-bold text-center transition-all ${
+                  settingsForm.authMode === 'remote'
+                    ? 'bg-sky-500 text-zinc-950 shadow-md'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                🌐 استعلام آنلاین از گوگل شیت
+              </button>
+            </div>
+
+            {settingsForm.authMode === 'remote' && (
+              <div className="space-y-3 pt-2 border-t border-zinc-800">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                    لینک Web App اسکریپت گوگل شیت جهت احراز هویت:
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    value={settingsForm.authWebhookUrl || ''}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, authWebhookUrl: e.target.value })}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-sky-300 font-mono dir-ltr placeholder:text-zinc-600"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowGasModal(true)}
+                    className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-xl font-medium transition-colors"
+                  >
+                    <Code className="w-4 h-4 text-amber-400" />
+                    <span>کد آماده گوگل شیت (Apps Script)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={testingRemoteAuth || !settingsForm.authWebhookUrl}
+                    onClick={async () => {
+                      if (!settingsForm.authWebhookUrl) return;
+                      setTestingRemoteAuth(true);
+                      setTestAuthResult(null);
+                      const testRes = await verifyRemotePinOrPassword(settingsForm.authWebhookUrl, 'test_connection');
+                      setTestAuthResult({
+                        success: testRes.success,
+                        message: testRes.success 
+                          ? 'ارتباط با گوگل شیت برقرار است! (اسکریپت به درستی پاسخ داد)' 
+                          : testRes.message || 'ارتباط برقرار نشد.'
+                      });
+                      setTestingRemoteAuth(false);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs text-sky-300 hover:text-white bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 px-3 py-1.5 rounded-xl font-bold transition-all disabled:opacity-50"
+                  >
+                    {testingRemoteAuth ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>در حال تست...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>تست اتصال به شیت</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {testAuthResult && (
+                  <p className={`text-xs p-2.5 rounded-xl border ${
+                    testAuthResult.success 
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                      : 'bg-red-500/10 text-red-400 border-red-500/30'
+                  }`}>
+                    {testAuthResult.message}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Telegram & Webhook Integration Box */}
@@ -824,6 +1092,76 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 className="bg-zinc-800 text-zinc-300 px-4 py-2.5 rounded-xl text-xs"
               >
                 انصراف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Google Apps Script Auth Code Modal */}
+      {showGasModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-zinc-900 border border-sky-500/30 rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl relative my-8">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <h3 className="font-bold text-sm text-sky-400 flex items-center gap-2">
+                <Code className="w-5 h-5 text-amber-400" />
+                <span>کد آماده اسکریپت گوگل شیت جهت احراز هویت آنلاین</span>
+              </h3>
+              <button
+                onClick={() => setShowGasModal(false)}
+                className="text-zinc-400 hover:text-white"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-zinc-300">
+              <p className="leading-relaxed">
+                برای فعال‌سازی احراز هویت آنلاین از طریق گوگل شیت، مراحل ساده زیر را انجام دهید:
+              </p>
+              <ol className="list-decimal list-inside space-y-1.5 text-zinc-300 text-[11px] bg-zinc-950 p-3.5 rounded-xl border border-zinc-800 leading-relaxed">
+                <li>فایل گوگل شیت (<span className="text-amber-400">Google Sheet</span>) خود را در مرورگر باز کنید.</li>
+                <li>از منوی بالا به مسیر <strong className="text-amber-300 font-mono">Extensions ➔ Apps Script</strong> بروید.</li>
+                <li>کد زیر را کپی کرده و جایگزین محتوای اولیه آنجا کنید.</li>
+                <li>مقدار <strong className="text-amber-300 font-mono">SECRET_ADMIN_PASSWORD</strong> را با رمز دلخواه خود تنظیم کنید (یا آن را به سلول A1 شیت متصل کنید).</li>
+                <li>دکمه <strong className="text-emerald-400">Deploy ➔ New deployment</strong> را زده، نوع آن را <strong className="text-sky-300">Web App</strong> انتخاب کنید.</li>
+                <li>در قسمت <strong className="text-amber-300">Who has access</strong> گزینه <strong className="text-amber-300">Anyone (هر کسی)</strong> را انتخاب کرده و دکمه Deploy را بزنید.</li>
+                <li>لینک وب‌اپ (<strong className="text-sky-300">Web App URL</strong>) داده شده را کپی کرده و در تنظیمات همین پنل وارد نمایید.</li>
+              </ol>
+            </div>
+
+            <div className="relative">
+              <pre className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-[11px] font-mono text-emerald-400 overflow-x-auto max-h-64 dir-ltr leading-relaxed">
+                {GOOGLE_APPS_SCRIPT_AUTH_TEMPLATE}
+              </pre>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_AUTH_TEMPLATE);
+                  setCopiedGasCode(true);
+                  setTimeout(() => setCopiedGasCode(false), 3000);
+                }}
+                className="absolute top-3 right-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-lg transition-all"
+              >
+                {copiedGasCode ? (
+                  <>
+                    <Check className="w-4 h-4 text-zinc-950" />
+                    <span>کپی شد!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    <span>کپی کدهای اسکریپت</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={() => setShowGasModal(false)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-5 py-2 rounded-xl text-xs font-bold"
+              >
+                بستن راهنما
               </button>
             </div>
           </div>

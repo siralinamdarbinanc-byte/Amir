@@ -1,0 +1,6 @@
+{
+  "name": "پیرایش امیر",
+  "description": "سامانه رزرو آنلاین نوبت و پنل مدیریت پیرایش امیر ویژه موبایل و دسکتاپ",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

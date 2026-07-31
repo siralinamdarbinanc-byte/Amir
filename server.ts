@@ -181,8 +181,8 @@ const DEFAULT_SETTINGS: ShopSettings = {
   offDays: [5], // Friday is off by default
   autoApprove: false,
   announcement: 'به پیرایش امیر خوش آمدید! لطفا ۵ دقیقه قبل از زمان رزرو شده در سالن حضور داشته باشید.',
-  googleSheetUrl: 'https://docs.google.com/spreadsheets/d/1Sjvw8N6e6jzrWo8y5AMd8g809h1R7b_dxK0MqX9V3_0/edit?usp=drivesdk',
-  googleSheetsWebhook: 'https://script.google.com/macros/s/AKfycbwUlLF0_IjBOSiwNDDScdtAODI4Zh5TGMorDFpPQCzQjOMKQ-vH1TBBtkyZCPZ93nHT/exec'
+  googleSheetUrl: 'https://docs.google.com/spreadsheets/d/1hSlUjER1fe7FzM3PWDUf5AQZ2ubm1K6WmpiPJNcZDRo/edit?usp=sharing',
+  googleSheetsWebhook: 'https://script.google.com/macros/s/AKfycbx2RqPAsaO9kuXG-XwA4ik4P-nTvkOxkoeyBzZU-F21d4eB2FcLwZsV0QMq3NrRHUBl/exec'
 };
 
 function loadDatabase(): DatabaseSchema {
@@ -236,7 +236,7 @@ function saveDatabase(db: DatabaseSchema) {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   app.use(express.json());
 
@@ -312,6 +312,113 @@ async function startServer() {
     db.settings = { ...db.settings, ...req.body };
     saveDatabase(db);
     res.json(db.settings);
+  });
+
+  // Verify Google Sheet / Apps Script Password Proxy
+  app.post('/api/verify-sheet-password', async (req, res) => {
+    const { url, password } = req.body;
+    const pwd = (password || '').toString().trim();
+    const targetUrl = (url || db.settings.googleSheetsWebhook || db.settings.googleSheetUrl || '').trim();
+
+    if (!pwd) {
+      return res.status(400).json({ success: false, message: 'لطفاً رمز عبور را وارد کنید.' });
+    }
+
+    try {
+      // 1. Check Google Apps Script Web App (script.google.com)
+      const appsScriptUrl = targetUrl.includes('script.google.com') 
+        ? targetUrl 
+        : (db.settings.googleSheetsWebhook || '');
+
+      if (appsScriptUrl && appsScriptUrl.includes('script.google.com')) {
+        try {
+          const scriptUrl = new URL(appsScriptUrl);
+          scriptUrl.searchParams.set('action', 'auth');
+          scriptUrl.searchParams.set('password', pwd);
+          scriptUrl.searchParams.set('pin', pwd);
+
+          const scriptRes = await fetch(scriptUrl.toString(), { method: 'GET' });
+          if (scriptRes.ok) {
+            const text = await scriptRes.text();
+            let json: any = null;
+            try {
+              json = JSON.parse(text);
+            } catch {
+              const cleanText = text.toLowerCase().replace(/\s+/g, '');
+              if (cleanText.includes('"success":true') || cleanText.includes('"authorized":true') || cleanText === 'true') {
+                return res.json({ success: true, message: 'ورود موفقیت‌آمیز' });
+              }
+            }
+
+            if (json) {
+              if (json.success === true || json.authorized === true || json.valid === true) {
+                return res.json({ success: true, message: 'ورود موفقیت‌آمیز' });
+              } else {
+                return res.json({ 
+                  success: false, 
+                  message: json.message || 'رمز عبور وارد شده با گوگل شیت مطابقت ندارد.' 
+                });
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Apps Script check failed:', e);
+        }
+      }
+
+      // 2. Direct Google Spreadsheet CSV check
+      const sheetUrl = targetUrl.includes('docs.google.com/spreadsheets')
+        ? targetUrl
+        : (db.settings.googleSheetUrl || '');
+
+      if (sheetUrl && sheetUrl.includes('docs.google.com/spreadsheets/d/')) {
+        const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+        const sheetId = match ? match[1] : '1hSlUjER1fe7FzM3PWDUf5AQZ2ubm1K6WmpiPJNcZDRo';
+        
+        const csvUrls = [
+          `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`,
+          `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`
+        ];
+
+        for (const csvUrl of csvUrls) {
+          try {
+            const csvRes = await fetch(csvUrl);
+            if (csvRes.ok) {
+              const csvText = await csvRes.text();
+              // Prevent matching HTML error pages
+              if (csvText.includes('<!DOCTYPE html>') || csvText.includes('<html')) {
+                continue;
+              }
+
+              const lines = csvText.split('\n').map(l => l.trim()).filter(Boolean);
+              
+              // Check top 5 rows for exact cell match
+              for (let i = 0; i < Math.min(5, lines.length); i++) {
+                const rowCells = lines[i].split(',').map(c => c.replace(/^"|"$/g, '').trim());
+                for (const cell of rowCells) {
+                  if (cell && cell === pwd) {
+                    return res.json({ success: true, message: 'ورود موفقیت‌آمیز' });
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.error('CSV fetch check failed:', e);
+          }
+        }
+      }
+
+      return res.json({ 
+        success: false, 
+        message: 'رمز عبور با اطلاعات گوگل شیت مطابقت ندارد یا دسترسی شیت عمومی (Public) نیست.' 
+      });
+    } catch (err: any) {
+      console.error('Verify sheet password error:', err);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'خطا در ارتباط با سرور گوگل: ' + (err.message || err) 
+      });
+    }
   });
 
   // Appointments API

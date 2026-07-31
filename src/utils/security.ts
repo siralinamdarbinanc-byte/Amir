@@ -80,15 +80,32 @@ export function resetFailedAttempts(): void {
 
 // Remote Google Apps Script / Webhook / Direct Google Sheet CSV Authentication
 export async function verifyRemotePinOrPassword(webhookUrl: string, pinOrPassword: string): Promise<{ success: boolean; message?: string }> {
-  if (!webhookUrl || !webhookUrl.trim()) {
+  const trimmedPassword = pinOrPassword.trim();
+  const cleanUrl = (webhookUrl || '').trim();
+
+  // 1. Try server proxy endpoint first (/api/verify-sheet-password)
+  try {
+    const apiRes = await fetch('/api/verify-sheet-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: cleanUrl, password: trimmedPassword })
+    });
+
+    if (apiRes.ok) {
+      const data = await apiRes.json();
+      return data;
+    }
+  } catch (err) {
+    console.warn('Backend proxy auth failed, falling back to client fetch:', err);
+  }
+
+  // 2. Client-side Fallback (if backend endpoint is not available e.g., static hosting)
+  if (!cleanUrl) {
     return { success: false, message: 'لینک اسکریپت یا گوگل شیت وارد نشده است.' };
   }
 
-  const cleanUrl = webhookUrl.trim();
-  const trimmedPassword = pinOrPassword.trim();
-
   try {
-    // Case A: Direct Google Spreadsheet Link (e.g., https://docs.google.com/spreadsheets/d/1hSlUjER1fe7FzM3PWDUf5AQZ2ubm1K6WmpiPJNcZDRo/edit...)
+    // Case A: Direct Google Spreadsheet Link
     if (cleanUrl.includes('docs.google.com/spreadsheets/d/')) {
       const match = cleanUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
       const sheetId = match ? match[1] : '1hSlUjER1fe7FzM3PWDUf5AQZ2ubm1K6WmpiPJNcZDRo';
@@ -97,83 +114,56 @@ export async function verifyRemotePinOrPassword(webhookUrl: string, pinOrPasswor
       const csvRes = await fetch(csvUrl);
       if (csvRes.ok) {
         const csvText = await csvRes.text();
-        // Extract first cell value (removing quotes and whitespace)
-        // CSV format: "Password", "1234", etc.
-        const lines = csvText.split('\n').map(l => l.trim()).filter(Boolean);
-        if (lines.length > 0) {
-          // Check all values in first line or first cell
-          const cells = lines[0].split(',').map(c => c.replace(/^"|"$/g, '').trim());
-          const firstCell = cells[0];
-          
-          // If the first row has a header like "Password", check the second cell or second row
-          let expectedPass = firstCell;
-          if (firstCell.toLowerCase().includes('pass') || firstCell.toLowerCase().includes('رمز') || firstCell.toLowerCase().includes('pin')) {
-            if (cells.length > 1 && cells[1]) {
-              expectedPass = cells[1];
-            } else if (lines.length > 1) {
-              const row2Cells = lines[1].split(',').map(c => c.replace(/^"|"$/g, '').trim());
-              expectedPass = row2Cells[0] || expectedPass;
+        if (!csvText.includes('<!DOCTYPE html>') && !csvText.includes('<html')) {
+          const lines = csvText.split('\n').map(l => l.trim()).filter(Boolean);
+          for (let i = 0; i < Math.min(5, lines.length); i++) {
+            const cells = lines[i].split(',').map(c => c.replace(/^"|"$/g, '').trim());
+            for (const cell of cells) {
+              if (cell && cell === trimmedPassword) {
+                return { success: true };
+              }
             }
           }
+        }
+      }
+    }
 
-          if (trimmedPassword === expectedPass) {
+    // Case B: Google Apps Script Web App URL (script.google.com)
+    if (cleanUrl.includes('script.google.com')) {
+      const urlWithParams = new URL(cleanUrl);
+      urlWithParams.searchParams.set('action', 'auth');
+      urlWithParams.searchParams.set('password', trimmedPassword);
+      urlWithParams.searchParams.set('pin', trimmedPassword);
+
+      const res = await fetch(urlWithParams.toString(), { method: 'GET' });
+
+      if (res.ok) {
+        const text = await res.text();
+        let json: any = null;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          const cleanText = text.toLowerCase().replace(/\s+/g, '');
+          if (cleanText.includes('"success":true') || cleanText.includes('"authorized":true') || cleanText === 'true') {
             return { success: true };
-          } else {
-            return { success: false, message: 'رمز عبور وارد شده با سلول A1 گوگل شیت مطابقت ندارد.' };
           }
         }
-      }
-    }
 
-    // Case B: Google Apps Script Web App URL (script.google.com/macros/s/.../exec)
-    const urlWithParams = new URL(cleanUrl);
-    urlWithParams.searchParams.set('action', 'auth');
-    urlWithParams.searchParams.set('password', trimmedPassword);
-    urlWithParams.searchParams.set('pin', trimmedPassword);
-
-    const res = await fetch(urlWithParams.toString(), {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-    });
-
-    if (res.ok) {
-      const text = await res.text();
-      let json: any = {};
-      try {
-        json = JSON.parse(text);
-      } catch (e) {
-        if (text.toLowerCase().includes('success') || text.toLowerCase().includes('true') || text.toLowerCase().includes('authorized')) {
-          return { success: true };
+        if (json) {
+          if (json.success === true || json.authorized === true || json.valid === true) {
+            return { success: true };
+          }
+          return { success: false, message: json.message || 'رمز عبور وارد شده با اطلاعات گوگل شیت مطابقت ندارد.' };
         }
       }
-
-      if (json.success === true || json.authorized === true || json.valid === true || json.status === 'success' || json.status === 200) {
-        return { success: true };
-      }
-      return { success: false, message: json.message || 'رمز عبور وارد شده با اطلاعات گوگل شیت مطابقت ندارد.' };
     }
 
-    // POST fallback if GET fails
-    const postRes = await fetch(cleanUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'auth', password: trimmedPassword, pin: trimmedPassword }),
-    });
-
-    if (postRes.ok) {
-      const json = await postRes.json();
-      if (json.success === true || json.authorized === true || json.valid === true || json.status === 'success') {
-        return { success: true };
-      }
-      return { success: false, message: json.message || 'رمز عبور نامعتبر است.' };
-    }
-
-    return { success: false, message: 'خطا در ارتباط با لینک گوگل شیت. وضعیت پاسخ: ' + res.status };
+    return { success: false, message: 'عدم امکان برقراری ارتباط مستقیم با گوگل شیت.' };
   } catch (err: any) {
-    console.error('Remote auth error:', err);
+    console.error('Remote auth fallback error:', err);
     return { 
       success: false, 
-      message: 'عدم امکان برقراری ارتباط با گوگل شیت. لطفاً دسترسی اینترنت و صحت لینک را بررسی کنید.' 
+      message: 'عدم امکان برقراری ارتباط با گوگل شیت. لطفاً دسترسی اینترنت و عمومی بودن شیت را بررسی کنید.' 
     };
   }
 }
